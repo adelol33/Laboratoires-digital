@@ -1,0 +1,43 @@
+/* ========================================
+ *
+ * Copyright YOUR COMPANY, THE YEAR
+ * All Rights Reserved
+ * UNPUBLISHED, LICENSED SOFTWARE.
+ *
+ * CONFIDENTIAL AND PROPRIETARY INFORMATION
+ * WHICH IS THE PROPERTY OF your company.
+ *
+ * ========================================
+*/
+#include "project.h"
+#include "keypad.h"
+
+int main(void)
+{
+    CyGlobalIntEnable; /* Enable global interrupts. */
+
+    /* Place your initialization/startup code here (e.g. MyInst_Start()) */
+    LCD_Start();
+    int a = 0; 
+    int b = 0;
+    for(;;)
+    {
+        CyDelay(100);
+        char key = keypadScan();  
+        
+        if (key != 'z') {
+            LCD_Position(a,b); 
+            LCD_PutChar(key);
+           
+            if (b != 7)
+                b += 1; 
+            else
+            {b = 0;
+               }
+                
+        }
+       /* on peut faire un modulo 8 pour que ça revienne à 0 à chaque fois */
+    }
+}
+
+/* [] END OF FILE */
