@@ -1,0 +1,51 @@
+/* ========================================
+ *
+ * Copyright YOUR COMPANY, THE YEAR
+ * All Rights Reserved
+ * UNPUBLISHED, LICENSED SOFTWARE.
+ *
+ * CONFIDENTIAL AND PROPRIETARY INFORMATION
+ * WHICH IS THE PROPERTY OF your company.
+ *
+ * ========================================
+*/
+#include "project.h"
+#include "math.h"
+
+float sinWave[100];
+int in = 0;
+
+
+CY_ISR(Timer_DAC_handler)
+{
+     Timer_ReadStatusRegister(); /* remet le bit TC à 0 automatiquement, on le met en début pour qu'il switch 
+    direct à 0, le timer continue en arrière plan. Si on le mettait à la fin, y aurait un delai.*/
+    float sample = 100*sinWave[in]; 
+    VDAC_SetValue(sample);
+        in ++; 
+        if (in == 100) {
+            in = 0; 
+    }
+}
+        
+int main(void)
+{
+    CyGlobalIntEnable; /* Enable global interrupts. */
+    Timer_Start();
+    VDAC_Start(); 
+    isr_StartEx(Timer_DAC_handler);
+    for (int i =0; i<100; i++) {
+        sinWave[i] = sin(2*M_PI*i/100);
+    }
+    /* Place your initialization/startup code here (e.g. MyInst_Start()) */
+     
+    uint8 overflow; 
+    for(;;)
+    {    
+    /* ici on met pas de code parce que dès qu'il y a un overflow, on entre dans la fonction Timer_DAC_handler et ça exécute le reste*/
+    }
+        /* Place your application code here. */
+
+}
+
+/* [] END OF FILE */
