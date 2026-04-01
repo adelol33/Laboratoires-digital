@@ -1,0 +1,50 @@
+/* ========================================
+ *
+ * Copyright YOUR COMPANY, THE YEAR
+ * All Rights Reserved
+ * UNPUBLISHED, LICENSED SOFTWARE.
+ *
+ * CONFIDENTIAL AND PROPRIETARY INFORMATION
+ * WHICH IS THE PROPERTY OF your company.
+ *
+ * ========================================
+*/
+#include "project.h"
+
+#define SERVO_REPOS    1500u  
+#define SERVO_ACTION   1900u
+
+int main(void)
+{
+    CyGlobalIntEnable; /* Enable global interrupts. */
+    PWM_Jump_Start();
+    PWM_Jump_WriteCompare(SERVO_REPOS);
+    /* Place your initialization/startup code here (e.g. MyInst_Start()) */
+
+    for(;;)
+    {
+        /*Led1_Write(Switch1_Read()); 
+        Led2_Write(Switch2_Read()); */
+      
+        /*PWM_Jump_WriteCompare(1.5*1500);
+        CyDelay(1000);
+        PWM_Jump_WriteCompare(0.5*1500);
+        CyDelay(1000);*/
+         // Le switch est en PULL-UP : 0 = appuyé, 1 = relâché
+        if (Switch_Jump_Read() == 0u)
+        {
+            // Switch appuyé → servo actionne la barre d'espace
+            PWM_Jump_WriteCompare(SERVO_ACTION);
+            Led_Jump_1_Write(Switch_Jump_Read());
+            Led_Jump_2_Write(Switch_Jump_Read());
+        }
+        else
+        {
+            // Switch relâché → servo revient au repos
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+        }
+        
+        CyDelay(20u); // Petite pause pour laisser le servo bouger
+    }
+}
+
