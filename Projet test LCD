@@ -97,11 +97,12 @@ int main(void)
             LCD_PrintString("Score: 0        ");
             CyDelay(500);
         }
-        }
 
         
                // 4. NETTOYAGE AFFICHAGE (Si ni Jump ni Duck, on efface le texte du haut)
-        else {
+        
+         else 
+        {
             PWM_Jump_WriteCompare(SERVO_REPOS);
             PWM_Duck_WriteCompare(SERVO_REPOS);
             if (gameRunning == 1) {
@@ -121,4 +122,3 @@ int main(void)
         }
     }
 }
-
