@@ -66,6 +66,7 @@ int main(void)
         if (Switch_Jump_Read() == 0u)
         {
             // Switch appuyé → servo actionne la barre d'espace
+            gameRunning = 1;
             PWM_Jump_WriteCompare(SERVO_ACTION);
             Led_Jump_1_Write(Switch_Jump_Read());
             Led_Jump_2_Write(Switch_Jump_Read());
@@ -100,8 +101,12 @@ int main(void)
 
         
                // 4. NETTOYAGE AFFICHAGE (Si ni Jump ni Duck, on efface le texte du haut)
-        if (!jumpReq && !duckReq && gameRunning == 1) {{
-            AffichageLCD("");
+        else {
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+            PWM_Duck_WriteCompare(SERVO_REPOS);
+            if (gameRunning == 1) {
+                AffichageLCD("");  // Juste le score en bas
+            }
         }
 
 // 5. SCORE (+10 par seconde)
