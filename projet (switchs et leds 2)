@@ -35,8 +35,8 @@ int main(void)
         {
             // Switch appuyé → servo actionne la barre d'espace
             PWM_Duck_WriteCompare(SERVO_ACTION);
-            Led_Duck_1_Write(Switch_Jump_Read());
-            Led_Duck_2_Write(Switch_Jump_Read());
+            Led_Duck_1_Write(Switch_Duck_Read());
+            Led_Duck_2_Write(Switch_Duck_Read());
         }
         else
         {
