@@ -1,0 +1,102 @@
+#include "project.h"
+
+#define SERVO_REPOS    1500u  
+#define SERVO_ACTION   1900u
+
+uint16 score = 0;
+uint8 gameRunning = 0;
+uint32 timerMS = 0;
+
+void AffichageLCD(char* action) {
+    LCD_Position(0, 0);
+    LCD_PrintString("                ");  // Efface ligne du haut
+    LCD_Position(0, 0);
+    LCD_PrintString(action);             // Affiche "JUMP!" ou "DUCK!" ou ""
+    LCD_Position(1, 0);                  // Ligne du bas
+    LCD_PrintString("Score: ");
+    LCD_PrintNumber(score);
+}
+
+int main(void)
+{
+    CyGlobalIntEnable;
+
+    PWM_Jump_Start();
+    PWM_Duck_Start();
+    LCD_Start();
+
+    PWM_Jump_WriteCompare(SERVO_REPOS);
+    PWM_Duck_WriteCompare(SERVO_REPOS);
+
+    // Affichage initial
+    LCD_Position(0, 0);
+    LCD_PrintString("Pret !          ");
+    LCD_Position(1, 0);
+    LCD_PrintString("Score: 0        ");
+
+    for(;;)
+    {
+        // --- Lecture des boutons (pull-up : 0 = appuyé) ---
+        uint8 jumpReq = (Switch_Jump_Read() == 0u);
+        uint8 duckReq = (Switch_Duck_Read() == 0u);
+        uint8 resetReq = (Switch_Reset_Read() == 0u);
+
+        // --- RESET ---
+        if (resetReq) {
+            score = 0;
+            gameRunning = 0;
+            timerMS = 0;
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+            PWM_Duck_WriteCompare(SERVO_REPOS);
+            LCD_ClearDisplay();
+            LCD_Position(0, 0);
+            LCD_PrintString("Reset!          ");
+            LCD_Position(1, 0);
+            LCD_PrintString("Score: 0        ");
+            CyDelay(500);
+        }
+
+        // --- JUMP ---
+        else if (jumpReq) {
+            gameRunning = 1;  // Le jeu démarre au premier saut !
+            PWM_Jump_WriteCompare(SERVO_ACTION);
+            Led_Jump_1_Write(1u);
+            Led_Jump_2_Write(1u);
+            AffichageLCD("JUMP!           ");
+            CyDelay(300u);  // Laisse le servo agir
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+            Led_Jump_1_Write(0u);
+            Led_Jump_2_Write(0u);
+        }
+
+        // --- DUCK ---
+        else if (duckReq) {
+            gameRunning = 1;
+            PWM_Duck_WriteCompare(SERVO_ACTION);
+            AffichageLCD("DUCK!           ");
+            CyDelay(400u);
+            PWM_Duck_WriteCompare(SERVO_REPOS);
+        }
+
+        // --- Idle : rien d'appuyé ---
+        else {
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+            PWM_Duck_WriteCompare(SERVO_REPOS);
+            if (gameRunning == 1) {
+                AffichageLCD("");  // Juste le score en bas
+            }
+        }
+
+        // --- SCORE : +10 toutes les secondes ---
+        if (gameRunning == 1) {
+            timerMS += 20;          // On ajoute 20ms à chaque tour
+            if (timerMS >= 1000) {
+                score += 10;
+                timerMS = 0;
+                AffichageLCD("");   // Rafraîchit le score
+            }
+        }
+
+        CyDelay(20u);  // Pause de 20ms par tour de boucle
+    }
+}
