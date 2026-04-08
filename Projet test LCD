@@ -19,16 +19,6 @@ uint16 score = 0;
 uint8 gameRunning = 0; // 0 = Arrêté, 1 = En cours
 uint32 timerMS = 0;    // Pour compter les millisecondes
 
-void AffichageLCD(char* action) {
-    LCD_Position(0, 0);
-    LCD_PrintString("                "); // Efface la ligne du haut
-    LCD_Position(0, 0);
-    LCD_PrintString(action);      // Affiche "Jump" ou "Duck" 
-    LCD_Position(1, 0);           // Deuxième ligne
-    LCD_PrintString("Score: ");
-    LCD_PrintNumber(score);       // Affiche le score actuel attention ici il faut le mettre à la ligne d'avant
-}
-
 
 int main(void)
 {
@@ -41,6 +31,11 @@ int main(void)
         // Position initiale
     PWM_Jump_WriteCompare(SERVO_REPOS);
     PWM_Duck_WriteCompare(SERVO_REPOS); 
+    // Affichage initial
+    LCD_Position(0, 0);
+    LCD_PrintString("Pret !          ");
+    LCD_Position(1, 0);
+    LCD_PrintString("Score: 0        ");
 
     for(;;)
     
@@ -58,7 +53,8 @@ int main(void)
         PWM_Jump_WriteCompare(0.5*1500);*/
         CyDelay(1000);
          // Le switch est en PULL-UP : 0 = appuyé, 1 = relâché
-        if (Switch_Jump_Read() == 1u)
+
+        if (Switch_Jump_Read() == 0u)
         {
             // Switch appuyé → servo actionne la barre d'espace
             PWM_Jump_WriteCompare(SERVO_ACTION);
@@ -82,9 +78,15 @@ int main(void)
             score = 0;
             gameRunning = 0;
             timerMS = 0;
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+            PWM_Duck_WriteCompare(SERVO_REPOS);
             LCD_ClearDisplay();
-            //AffichageLCD("Reset");
-            CyDelay(500); // Pause pour éviter les resets multiples
+            LCD_Position(0, 0);
+            LCD_PrintString("Reset!          ");
+            LCD_Position(1, 0);
+            LCD_PrintString("Score: 0        ");
+            CyDelay(500);
+        }
         }
 
         
@@ -96,7 +98,7 @@ int main(void)
         }
 
 // 5. SCORE (+10 par seconde)
-        if (gameRunning == 1) {
+        if (Switch_Jump_Read() == 0u) {
             CyDelay(10); /* Précision de 10ms*/
             timerMS += 10;
             if (timerMS >= 1000) {
