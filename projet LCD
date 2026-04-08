@@ -4,20 +4,20 @@
 #define SERVO_REPOS    1500u  
 #define SERVO_ACTION   1900u
 
+
 uint16_t score = 0;
 uint8_t  gameRunning = 0; 
 uint32_t timerMS = 0;
 
 void AffichageAction(char* texte) {
     LCD_Position(0, 0);
-    LCD_PrintString("                "); // Efface la ligne
+    LCD_PrintString("                "); 
     LCD_Position(0, 0);
     LCD_PrintString(texte);
 }
 
 void AffichageScore() {
     LCD_Position(1, 0);
-    LCD_PrintString("Score: ");
     LCD_PrintNumber(score);
     LCD_PrintString("    "); 
 }
@@ -28,55 +28,12 @@ int main(void)
     PWM_Jump_Start();
     PWM_Duck_Start();
     LCD_Start();
-    
-    PWM_Jump_WriteCompare(SERVO_REPOS);
-    PWM_Duck_WriteCompare(SERVO_REPOS);
     LCD_ClearDisplay();
     AffichageScore();
 
-    for(;;) // --- DEBUT DE LA BOUCLE (Accolade ajoutée ici !) ---
+    for(;;)
     {
-        // 1. GESTION DU JUMP
-        if (Switch_Jump_Read() == 0u) 
-        {
-            PWM_Jump_WriteCompare(SERVO_ACTION);
-            AffichageAction("JUMP!");
-            if (gameRunning == 0) gameRunning = 1; 
-            
-            // On reste ici tant qu'on appuie
-            while(Switch_Jump_Read() == 0u) { CyDelay(10); } 
-            
-            // Dès qu'on lâche : on nettoie
-            PWM_Jump_WriteCompare(SERVO_REPOS);
-            AffichageAction(""); 
-        }
-
-        // 2. GESTION DU DUCK
-        else if (Switch_Duck_Read() == 0u) 
-        {
-            PWM_Duck_WriteCompare(SERVO_ACTION);
-            if (gameRunning == 1) AffichageAction("DUCK!");
-            
-            while(Switch_Duck_Read() == 0u) { CyDelay(10); }
-            
-            PWM_Duck_WriteCompare(SERVO_REPOS);
-            AffichageAction("");
-        }
-
-        // 3. GESTION DU RESET (Indépendant du else if)
-        if (Switch_Reset_Read() == 0u) 
-        {
-            score = 0;
-            gameRunning = 0;
-            timerMS = 0;
-            AffichageAction("RESET...");
-            AffichageScore();
-            while(Switch_Reset_Read() == 0u) { CyDelay(10); }
-            CyDelay(200);
-            AffichageAction(""); // On efface le mot RESET
-        }
-
-        // 4. CHRONO DU SCORE
+        // --- 1. GESTION DU SCORE (Priorité) ---
         if (gameRunning == 1) 
         {
             CyDelay(10); 
@@ -86,10 +43,37 @@ int main(void)
                 timerMS = 0;
                 AffichageScore();
             }
+        } else {
+            CyDelay(10);
         }
+
+        // --- 2. LECTURE DES BOUTONS ---
+        // Si tes boutons sont inversés, on va juste changer les noms ici !
+        
+        // Si SW3 (qui affiche jump actuellement) est pressé
+        if (Switch_Jump_Read() == 1u)  // Apparemment c'est ton SW3 qui fait le jump
+        {
+            AffichageAction("JUMP!");
+            if (gameRunning == 0) gameRunning = 1;
+        }
+        // Si SW1 (qui affiche reset actuellement) est pressé
+        else if (Switch_Reset_Read() == 1u) 
+        {
+            score = 0;
+            gameRunning = 0;
+            AffichageAction("RESET");
+            AffichageScore();
+        }
+        // On teste le DUCK avec "== 1u" aussi
+        else if (Switch_Duck_Read() == 1u)
+        {
+            AffichageAction("DUCK!");
+            PWM_Duck_WriteCompare(SERVO_ACTION);
+        }
+        // Si rien n'est pressé
         else 
         {
-            CyDelay(10); // Petite pause pour ne pas saturer le CPU au repos
+            AffichageAction(""); 
         }
-    } // --- FIN DE LA BOUCLE ---
+    }
 }
