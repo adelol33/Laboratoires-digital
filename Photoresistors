@@ -1,0 +1,151 @@
+/* ========================================
+ * Projet : Contrôle Servomoteurs par Photorésistors
+ * PSoC Creator - main.c
+ * 
+ * Photo 1 -> Servo 1
+ * Photo 2 -> Servo 2
+ * Obscurité détectée -> angle entre 90° et 180°
+ * Lumière détectée   -> servomoteur en position 0°
+ * ======================================== */
+
+#include "project.h"
+
+/* -----------------------------------------------
+ * CONSTANTES PWM pour servomoteur (période = 20ms)
+ * Assumant une clock PWM telle que 1 count = 1µs
+ * Servo standard :
+ *   0°   = 1000 µs
+ *   90°  = 1500 µs
+ *   180° = 2000 µs
+ * ----------------------------------------------- */
+#define SERVO_0_DEG      1000u   /* 1000 µs -> 0°   */
+#define SERVO_90_DEG     1500u   /* 1500 µs -> 90°  */
+#define SERVO_180_DEG    2000u   /* 2000 µs -> 180° */
+
+/* Seuil ADC : en dessous = obscurité
+ * ADC 12 bits (0-4095), ajuster selon votre circuit
+ * Exemple : < 1000 = obscurité (photorésistance élevée)   */
+#define DARKNESS_THRESHOLD  1000u
+
+/* Nombre de canaux ADC à séquencer */
+#define ADC_CHANNEL_PHOTO1   0u
+#define ADC_CHANNEL_PHOTO2   1u
+
+/* -----------------------------------------------
+ * Prototypes
+ * ----------------------------------------------- */
+void    Servo_SetAngle(uint8 servoID, uint16 angle_deg);
+uint16  Map_ADC_To_Angle(int16 adcValue);
+
+/* -----------------------------------------------
+ * Servo_SetAngle
+ * servoID : 1 ou 2
+ * angle_deg : angle en degrés (0 à 180)
+ * ----------------------------------------------- */
+void Servo_SetAngle(uint8 servoID, uint16 angle_deg)
+{
+    /* Convertit l'angle (0-180°) en largeur d'impulsion (1000-2000 µs) */
+    uint16 pulseWidth = SERVO_0_DEG + (uint16)((uint32)angle_deg * 1000u / 180u);
+
+    /* Clamp pour sécurité */
+    if (pulseWidth < SERVO_0_DEG)   pulseWidth = SERVO_0_DEG;
+    if (pulseWidth > SERVO_180_DEG) pulseWidth = SERVO_180_DEG;
+
+    if (servoID == 1u)
+    {
+        PWM_Servo1_WriteCompare(pulseWidth);
+    }
+    else if (servoID == 2u)
+    {
+        PWM_Servo2_WriteCompare(pulseWidth);
+    }
+}
+
+/* -----------------------------------------------
+ * Map_ADC_To_Angle
+ * Quand obscurité : mappe la valeur ADC (0 -> seuil)
+ * sur une plage d'angle (90° -> 180°)
+ * Plus il fait sombre, plus l'angle est grand.
+ * ----------------------------------------------- */
+uint16 Map_ADC_To_Angle(int16 adcValue)
+{
+    uint32 angle;
+
+    if (adcValue < 0) adcValue = 0;
+
+    /* Obscurité totale (ADC = 0)  -> 180°
+       Limite obscurité (ADC = seuil) -> 90°  */
+    if ((uint16)adcValue >= DARKNESS_THRESHOLD)
+    {
+        return 90u; /* juste au seuil -> 90° */
+    }
+
+    /* Interpolation linéaire inverse :
+       angle = 180 - (adcValue * 90 / DARKNESS_THRESHOLD) */
+    angle = 180u - ((uint32)adcValue * 90u / DARKNESS_THRESHOLD);
+
+    if (angle > 180u) angle = 180u;
+    if (angle < 90u)  angle = 90u;
+
+    return (uint16)angle;
+}
+
+/* -----------------------------------------------
+ * MAIN
+ * ----------------------------------------------- */
+int main(void)
+{
+    int16  adc1, adc2;
+    uint16 angle1, angle2;
+
+    CyGlobalIntEnable; /* Active les interruptions globales */
+
+    /* --- Démarrage des composants PSoC --- */
+    ADC_SAR_Seq_Start();          /* ADC séquentiel multi-canaux     */
+    ADC_SAR_Seq_StartConvert();   /* Lance les conversions en continu */
+
+    PWM_Servo1_Start();           /* PWM pour servo 1                */
+    PWM_Servo2_Start();           /* PWM pour servo 2                */
+
+    /* Position initiale : 0° (repos) */
+    Servo_SetAngle(1u, 0u);
+    Servo_SetAngle(2u, 0u);
+    CyDelay(500u);
+
+    /* --- Boucle principale --- */
+    for(;;)
+    {
+        /* Attendre la fin de conversion des 2 canaux */
+        ADC_SAR_Seq_IsEndConversion(ADC_SAR_Seq_WAIT_FOR_RESULT);
+
+        /* Lecture des valeurs ADC */
+        adc1 = ADC_SAR_Seq_GetResult16(ADC_CHANNEL_PHOTO1);
+        adc2 = ADC_SAR_Seq_GetResult16(ADC_CHANNEL_PHOTO2);
+
+        /* --- Logique Photorésistor 1 / Servo 1 --- */
+        if (adc1 < (int16)DARKNESS_THRESHOLD)
+        {
+            /* Obscurité : angle entre 90° et 180° selon intensité */
+            angle1 = Map_ADC_To_Angle(adc1);
+            Servo_SetAngle(1u, angle1);
+        }
+        else
+        {
+            /* Lumière : retour à 0° */
+            Servo_SetAngle(1u, 0u);
+        }
+
+        /* --- Logique Photorésistor 2 / Servo 2 --- */
+        if (adc2 < (int16)DARKNESS_THRESHOLD)
+        {
+            angle2 = Map_ADC_To_Angle(adc2);
+            Servo_SetAngle(2u, angle2);
+        }
+        else
+        {
+            Servo_SetAngle(2u, 0u);
+        }
+
+        CyDelay(50u); /* Rafraîchissement toutes les 50 ms */
+    }
+}
