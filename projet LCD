@@ -1,0 +1,112 @@
+/* ========================================
+ *
+ * Copyright YOUR COMPANY, THE YEAR
+ * All Rights Reserved
+ * UNPUBLISHED, LICENSED SOFTWARE.
+ *
+ * CONFIDENTIAL AND PROPRIETARY INFORMATION
+ * WHICH IS THE PROPERTY OF your company.
+ *
+ * ========================================
+*/
+#include "project.h"
+
+#define SERVO_REPOS    1500u  
+#define SERVO_ACTION   1900u
+
+// --- Variables pour le Score ---
+uint16 score = 0;
+uint8 gameRunning = 0; // 0 = Arrêté, 1 = En cours
+uint32 timerMS = 0;    // Pour compter les millisecondes
+
+void AffichageLCD(char* action) {
+    LCD_Position(0, 0);
+    LCD_PrintString("                "); // Efface la ligne du haut
+    LCD_Position(0, 0);
+    LCD_PrintString(action);      // Affiche "Jump" ou "Duck" 
+    LCD_Position(1, 0);           // Deuxième ligne
+    LCD_PrintString("Score: ");
+    LCD_PrintNumber(score);       // Affiche le score actuel
+}
+
+int main(void)
+{
+    CyGlobalIntEnable; 
+    PWM_Jump_Start();
+    PWM_Duck_Start();
+    LCD_Start();
+    
+    // Position initiale
+    PWM_Jump_WriteCompare(SERVO_REPOS);
+    PWM_Duck_WriteCompare(SERVO_REPOS);
+    LCD_ClearDisplay();
+    AffichageLCD("Ready?");  /* Etat d'attente avant que le jeu commence pour être sûr que tous est bien branché*/
+
+    /* Place your initialization/startup code here (e.g. MyInst_Start()) */
+
+for(;;)
+    {
+        // --- 0. DETECTION DES COMMANDES (Centralisation) ---
+        // On crée des variables "booléennes" (0 ou 1)
+        // Le saut est demandé si : Bouton OU Photo-résistance OU Clavier
+        uint8_t jumpReq = (Switch_Jump_Read() == 0u || Sensor_Jump_Read() == 1u || Keyboard_Jump == 1);
+        uint8_t duckReq = (Switch_Duck_Read() == 0u || Sensor_Duck_Read() == 1u || Keyboard_Duck == 1);
+        // J'ai nommer les sensors et keybord comme ca mais on pourra changer si jamais 
+        
+        // 1. GESTION DU RESET (SW3)
+        // Si on appuie sur SW3 ( : 0 = appuyé)
+        if (Switch_Reset_Read() == 0u) {
+            score = 0;
+            gameRunning = 0;
+            timerMS = 0;
+            LCD_ClearDisplay();
+            AffichageLCD("Reset");
+            CyDelay(500); // Pause pour éviter les resets multiples
+        }
+
+        // 2. LOGIQUE DU SERVO (Ton code existant)
+        if (jumpReq) {  
+            PWM_Jump_WriteCompare(SERVO_ACTION);
+            // Si le moteur bouge, on lance le jeu !
+            if(gameRunning == 0) gameRunning = 1; /* Le saut lance le score*/
+            AffichageLCD("JUMP! ");
+        } 
+        else {
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+        }
+        
+        // 3. LOGIQUE DUCK (SW2 / Flèche bas)
+        if (duckReq) {
+            PWM_Duck_WriteCompare(SERVO_ACTION);
+            
+            // Le gameRunning ne change pas avec duck 
+            // Si le jeu n'est pas lancé le score reste à 0.
+            if(gameRunning == 1) {
+                AffichageLCD("DUCK!");
+            }
+        }
+        else {
+            PWM_Duck_WriteCompare(SERVO_REPOS);
+        }
+        
+        // 4. NETTOYAGE AFFICHAGE (Si ni Jump ni Duck, on efface le texte du haut)
+        if (!jumpReq && !duckReq && gameRunning == 1) {
+            // Optionnel : tu peux laisser vide ou remettre "Ready"
+            LCD_Position(0, 0);
+            LCD_PrintString("                "); 
+        }
+
+// 5. SCORE (+10 par seconde)
+        if (gameRunning == 1) {
+            CyDelay(10); /* Précision de 10ms*/
+            timerMS += 10;
+            if (timerMS >= 1000) {
+                score += 10;
+                timerMS = 0;
+                AffichageLCD(""); // Met à jour juste le score en bas
+            }
+        }
+    }
+}
+
+/* [] END OF FILE */
