@@ -1,0 +1,190 @@
+/* ========================================
+ *
+ * Copyright YOUR COMPANY, THE YEAR
+ * All Rights Reserved
+ * UNPUBLISHED, LICENSED SOFTWARE.
+ *
+ * CONFIDENTIAL AND PROPRIETARY INFORMATION
+ * WHICH IS THE PROPERTY OF your company.
+ *
+ * ========================================
+*/
+#include "project.h"
+#include "keypad.h"
+
+#define SERVO_REPOS    2000u  
+#define SERVO_ACTION   1500u
+
+// --- Variables pour le Score ---
+uint16 score = 0;
+uint8 gameRunning = 0; // 0 = Arrêté, 1 = En cours
+uint32 timerMS = 0;    // Pour compter les millisecondes
+
+// --- Variables pour les photoresistors ---
+/* Seuil ADC : en dessous = obscurité
+ * ADC 12 bits (0-4095), ajuster selon votre circuit
+ * Exemple : < 1000 = obscurité (photorésistance élevée)   */
+#define DARKNESS_THRESHOLD  1000u
+
+/* Nombre de canaux ADC à séquencer */
+#define ADC_CHANNEL_PHOTO1   0u
+#define ADC_CHANNEL_PHOTO2   1u
+
+
+
+void AffichageLCD(char* action) {
+    LCD_Position(0, 0);
+    LCD_PrintString("                "); // Efface la ligne du haut
+    LCD_Position(0, 0);
+    LCD_PrintString(action);      // Affiche "Jump" ou "Duck" 
+    LCD_Position(1, 0);           // Deuxième ligne
+    LCD_PrintString("Score: ");
+    LCD_PrintNumber(score);       // Affiche le score actuel attention ici il faut le mettre à la ligne d'avant
+}
+
+void Jump(void)
+{
+    PWM_Jump_WriteCompare(SERVO_ACTION);
+    Led_Jump_1_Write(Switch_Jump_Read());
+    Led_Jump_2_Write(Switch_Jump_Read());
+}
+
+void Duck(void)
+{
+    PWM_Duck_WriteCompare(SERVO_ACTION);
+    Led_Duck_1_Write(Switch_Duck_Read());
+    Led_Duck_2_Write(Switch_Duck_Read());
+}
+
+
+/* -----------------------------------------------
+ * Map_ADC_To_Angle
+ * Quand obscurité : mappe la valeur ADC (0 -> seuil)
+ * sur une plage d'angle (90° -> 180°)
+ * Plus il fait sombre, plus l'angle est grand. ATTENTION A METTRE EN COMMUN AVEC LES SERVO QUAND ILS VONT FONCTIONNER!!!!
+ * ----------------------------------------------- */
+uint16 Map_ADC_To_Angle(int16 adcValue)
+{
+    uint32 angle;
+
+    if (adcValue < 0) adcValue = 0;
+
+    /* Obscurité totale (ADC = 0)  -> 180°
+       Limite obscurité (ADC = seuil) -> 90°  */
+    if ((uint16)adcValue >= DARKNESS_THRESHOLD)
+    {
+        return 90u; /* juste au seuil -> 90° */
+    }
+
+    /* Interpolation linéaire inverse :
+       angle = 180 - (adcValue * 90 / DARKNESS_THRESHOLD) */
+    angle = 180u - ((uint32)adcValue * 90u / DARKNESS_THRESHOLD);
+
+    if (angle > 180u) angle = 180u;
+    if (angle < 90u)  angle = 90u;
+
+    return (uint16)angle;
+}
+
+
+int main(void)
+{
+    CyGlobalIntEnable; /* Enable global interrupts. */
+    PWM_Jump_Start();
+    PWM_Duck_Start();
+    LCD_Start();
+    
+    PWM_Jump_WriteCompare(SERVO_REPOS);
+    
+    PWM_Jump_WriteCompare(SERVO_REPOS);
+    PWM_Duck_WriteCompare(SERVO_REPOS); 
+    keypadInit();
+
+    for(;;)
+    
+    {   
+        char key = keypadScan();
+
+        if (Switch_Jump_Read() == 1u) || (key == '*')
+        {
+            // Switch appuyé → servo actionne la barre d'espace
+            Jump();
+            //LCD_Position(0, 0);
+            //LCD_PrintString("JUMP!");
+        }
+        else
+        {
+            // Switch relâché → servo revient au repos
+            // normalement ça prend aussi en compte le fait de relâcher la touche'*' mais à verif
+            // sinon else if
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+            
+            //LCD_ClearDisplay();
+          
+        }
+        
+        if (Switch_Duck_Read() == 1u) || (key == '0')
+        {
+            // Switch appuyé → servo actionne la barre d'espace
+            Duck();
+            //LCD_Position(0, 0);
+            //LCD_PrintString("JUMP!");
+        }
+        else
+        {
+            // Switch relâché → servo revient au repos
+            PWM_Duck_WriteCompare(SERVO_REPOS);
+            
+            //LCD_ClearDisplay();
+        }
+        
+        // --- 0. DETECTION DES COMMANDES (Centralisation) ---
+        // On crée des variables "booléennes" (0 ou 1)
+        // Le saut est demandé si : Bouton OU Photo-résistance OU Clavier
+        // j'ai pas encore ajouté le keyboard ici 
+        uint8_t jumpReq = (Switch_Jump_Read() == 0u ) ;
+        uint8_t duckReq = (Switch_Duck_Read() == 0u) ;
+        // J'ai nommer les sensors et keybord comme ca mais on pourra changer si jamais 
+        /*Led_Jump_1_Write(Switch_Jump_Read()); 
+        Led_Jump_2_Write(Switch_Jump_Read());
+      
+        PWM_Jump_WriteCompare(1.5*1500);
+        CyDelay(1000);
+        PWM_Jump_WriteCompare(0.5*1500);*/
+       
+         // Le switch est en PULL-UP : 0 = appuyé, 1 = relâché
+        
+/*
+                // 1. GESTION DU RESET (SW3)
+        // Si on appuie sur SW3 ( : 0 = appuyé)
+        CyDelay(20u); // Petite pause pour laisser le servo bouger
+        
+        if (Switch_Reset_Read() == 0u) {
+            score = 0;
+            gameRunning = 0;
+            timerMS = 0;
+            LCD_ClearDisplay();
+            //AffichageLCD("Reset");
+            CyDelay(500); // Pause pour éviter les resets multiples
+        }
+
+        
+               // 4. NETTOYAGE AFFICHAGE (Si ni Jump ni Duck, on efface le texte du haut)
+        if (!jumpReq && !duckReq && gameRunning == 1) {
+            // Optionnel : tu peux laisser vide ou remettre "Ready"
+            LCD_Position(0, 0);
+            LCD_PrintString("                "); 
+        }
+
+// 5. SCORE (+10 par seconde)
+        if (gameRunning == 1) {
+            CyDelay(10); Précision de 10ms
+            timerMS += 10;
+            if (timerMS >= 1000) {
+                score += 10;
+                timerMS = 0;
+                AffichageLCD(""); // Met à jour juste le score en bas
+            }
+        }*/
+    }
+}
