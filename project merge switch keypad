@@ -1,0 +1,77 @@
+#include "project.h"
+#include "keypad.h"
+
+// Positions du servo
+#define SERVO_REPOS   2000u
+#define SERVO_ACTION  1500u
+
+// Seuils photorésistances
+#define SEUIL_PHOTO1  4277   // capteur BAS  → jump
+#define SEUIL_PHOTO2  427    // capteur HAUT → duck
+
+void Jump(void)
+{
+    PWM_Jump_WriteCompare(SERVO_ACTION);
+    LED1_Write(0);
+    LED2_Write(0);
+}
+
+void Duck(void)
+{
+    PWM_Duck_WriteCompare(SERVO_ACTION);
+    LED3_Write(0);
+    LED4_Write(0);
+}
+
+int main(void)
+{
+    CyGlobalIntEnable;
+
+    // Initialisation
+    PWM_Jump_Start();
+    PWM_Duck_Start();
+    ADC_Start();
+    ADC_StartConvert();
+    keypadInit();
+
+    // Position de repos au démarrage
+    PWM_Jump_WriteCompare(SERVO_REPOS);
+    PWM_Duck_WriteCompare(SERVO_REPOS);
+
+    for(;;)
+    {
+        char key = keypadScan();
+
+        // Lecture photorésistances
+        ADC_IsEndConversion(ADC_WAIT_FOR_RESULT);
+        int16 val_bas  = ADC_GetResult16(0); // PHOTO1 → jump
+        int16 val_haut = ADC_GetResult16(1); // PHOTO2 → duck
+
+        uint8 obstacle_bas  = (val_bas  > SEUIL_PHOTO1);
+        uint8 obstacle_haut = (val_haut > SEUIL_PHOTO2);
+
+        // -------- JUMP --------
+        if ( (SWJ_Read() == 0u) || (key == '*') || obstacle_bas )
+        {
+            Jump();
+        }
+        else
+        {
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+            LED1_Write(1);
+            LED2_Write(1);
+        }
+
+        // -------- DUCK --------
+        if ( (SWD_Read() == 0u) || (key == '0') || obstacle_haut )
+        {
+            Duck();
+        }
+        else
+        {
+            PWM_Duck_WriteCompare(SERVO_REPOS);
+            LED3_Write(1);
+            LED4_Write(1);
+        }
+    }
+}
