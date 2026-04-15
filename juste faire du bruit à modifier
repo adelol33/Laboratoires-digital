@@ -1,0 +1,53 @@
+#include <project.h>
+
+#define SAMPLE_SIZE 64
+
+uint8 sineWave[SAMPLE_SIZE] = {
+128,140,153,165,177,188,198,207,
+216,223,229,234,237,239,240,239,
+237,234,229,223,216,207,198,188,
+177,165,153,140,128,115,102,90,
+78,67,57,48,39,32,26,21,
+18,16,15,16,18,21,26,32,
+39,48,57,67,78,90,102,115
+};
+
+volatile float phase = 0;
+volatile float step = 4.0; // démarre directement
+
+#define STEP_START 5.0
+#define STEP_DECAY 0.96
+
+CY_ISR(MyISR)
+{
+    VDAC_SetValue(sineWave[(int)phase]);
+
+    phase += step;
+
+    if(phase >= SAMPLE_SIZE)
+        phase -= SAMPLE_SIZE;
+
+    // effet "descente"
+    step *= STEP_DECAY;
+
+    // quand trop bas → on relance un saut
+    if(step < 0.5)
+    {
+        step = STEP_START;
+        phase = 0;
+    }
+}
+
+int main(void)
+{
+    CyGlobalIntEnable;
+
+    VDAC_Start();
+    Timer_Start();
+    isr_StartEx(MyISR);
+
+    for(;;)
+    {
+        // rien ici
+    }
+}
