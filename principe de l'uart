@@ -1,0 +1,142 @@
+// ok du PSoC à Termite mais de Termite à PSoC les servo ne bougent pas (peut être lié au problème des OU et des photot resistors non fonctionnels 
+
+#include "project.h"
+#include "keypad.h"
+#include <string.h>
+
+#define SERVO_REPOS   2000u
+#define SERVO_ACTION  1500u
+
+#define SEUIL_PHOTO1  4277
+#define SEUIL_PHOTO2  427
+
+char    uart_buf[10];
+uint8_t uart_idx = 0;
+uint8_t do_jump  = 0;   
+uint8_t do_duck  = 0;
+uint8_t jump_actif = 0;
+uint8_t duck_actif = 0;
+
+
+CY_ISR(isr_Handler) {
+    uint8 status = 0;
+    do {
+        status = UART_ReadRxStatus();
+        if ((status & UART_RX_STS_FIFO_NOTEMPTY) != 0) {
+            char c = UART_ReadRxData();
+            if (c == '\r') {
+                uart_buf[uart_idx] = '\0';
+                uart_idx = 0;
+                if (strcmp(uart_buf, "jump") == 0) { 
+                    do_jump = 1;
+                }
+                else if (strcmp(uart_buf, "duck") == 0) {
+                    do_duck = 1;
+                }
+            }
+            else {
+                if (uart_idx < sizeof(uart_buf) - 1)
+                    uart_buf[uart_idx++] = c;
+            } 
+        }
+    } while ((status & UART_RX_STS_FIFO_NOTEMPTY) != 0);
+}
+
+void Jump(void)
+{
+    PWM_Jump_WriteCompare(SERVO_ACTION);
+    LED1_Write(0);
+    LED2_Write(0);
+}
+
+void Duck(void)
+{
+    PWM_Duck_WriteCompare(SERVO_ACTION);
+    LED3_Write(0);
+    LED4_Write(0);
+}
+
+int main(void)
+{
+    CyGlobalIntEnable;
+
+    PWM_Jump_Start();
+    PWM_Duck_Start();
+    ADC_Start();
+    ADC_StartConvert();
+    keypadInit();
+    UART_Start(); 
+    isr_StartEx(isr_Handler);
+
+    PWM_Jump_WriteCompare(SERVO_REPOS);
+    PWM_Duck_WriteCompare(SERVO_REPOS);
+
+    for(;;)
+    {
+        char key = keypadScan();
+
+        ADC_IsEndConversion(ADC_WAIT_FOR_RESULT);
+        int16 val_bas  = ADC_GetResult16(0);
+        int16 val_haut = ADC_GetResult16(1);
+
+        uint8 obstacle_bas  = (val_bas  > SEUIL_PHOTO1);
+        uint8 obstacle_haut = (val_haut > SEUIL_PHOTO2);
+        
+        // l'intit du timer devrait probablement être en dehors de la boucle mais ça ne fonctionne plus en le mettant en dehors
+        uint16_t jump_timer = 0;
+        uint16_t duck_timer = 0;
+
+// -------- JUMP --------
+        if (do_jump) {
+        Jump();
+        UART_PutString("Jump\r\n");   // ← envoie au PC
+        jump_timer = 500;
+        do_jump = 0;
+        }
+        if ( (SWJ_Read() == 0u) || (key == '*') || obstacle_bas ) {
+            if (!jump_actif) {
+                UART_PutString("Jump\r\n");  // ← envoie au PC
+                jump_actif = 1;
+            }
+            Jump();
+            jump_timer = 500;
+        }
+        if (jump_timer > 0) {
+            jump_timer--;
+            Jump();
+        }
+        else if (SWJ_Read() != 0u && key != '*' && !obstacle_bas) {
+            jump_actif = 0;
+            PWM_Jump_WriteCompare(SERVO_REPOS);
+            LED1_Write(1);
+            LED2_Write(1);
+        }
+
+        // -------- DUCK --------
+        if (do_duck) {
+            Duck();
+            UART_PutString("Duck\r\n");   // ← envoie au PC
+            duck_timer = 500;
+            do_duck = 0;
+        }
+        if ( (SWD_Read() == 0u) || (key == '0') || obstacle_haut ) {
+            if (!duck_actif) {
+                UART_PutString("Duck\r\n");  // ← envoie au PC
+                duck_actif = 1;
+            }
+            Duck();
+            duck_timer = 500;
+        }
+        if (duck_timer > 0) {
+            duck_timer--;
+            Duck();
+        }
+        else if (SWD_Read() != 0u && key != '0' && !obstacle_haut) {
+            duck_actif = 0;
+            PWM_Duck_WriteCompare(SERVO_REPOS);
+            LED3_Write(1);
+            LED4_Write(1);
+        }
+        
+    }
+}
