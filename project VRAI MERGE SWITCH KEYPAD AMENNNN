@@ -1,0 +1,90 @@
+#include "project.h"
+#include "keypad.h"
+
+#define SERVO_REPOS     2000u
+#define SERVO_ACTION    1500u
+#define TEMPS_ALLER     300u  // temps pour aller en position action (à ajuster)
+#define TEMPS_RETOUR    300u  // temps pour revenir en position repos (à ajuster)
+
+int main(void)
+{
+    CyGlobalIntEnable;
+
+    PWM_Start();
+    keypadInit();
+
+    PWM_WriteCompare1(SERVO_REPOS);
+    PWM_WriteCompare2(SERVO_REPOS);
+    LED1_Write(1);
+    LED2_Write(1);
+    LED3_Write(1);
+    LED4_Write(1);
+
+    for(;;)
+    {
+        CyDelay(10);
+        char key = keypadScan();
+
+        /* ====================================================
+           JUMP : * ou SWJ
+           ==================================================== */
+        if (key == '*')
+        {
+            // 1. Envoyer commande position action
+            PWM_WriteCompare1(SERVO_ACTION);
+            LED1_Write(0);
+            LED2_Write(0);
+            // 2. Attendre que le servo atteigne sa position action
+            CyDelay(TEMPS_ALLER);
+            // 3. Envoyer commande position repos
+            PWM_WriteCompare1(SERVO_REPOS);
+            LED1_Write(1);
+            LED2_Write(1);
+            // 4. Attendre que le servo atteigne sa position repos
+            CyDelay(TEMPS_RETOUR);
+        }
+        else if (SWJ_Read() == 0u)
+        {
+            PWM_WriteCompare1(SERVO_ACTION);
+            LED1_Write(0);
+            LED2_Write(0);
+        }
+        else
+        {
+            PWM_WriteCompare1(SERVO_REPOS);
+            LED1_Write(1);
+            LED2_Write(1);
+        }
+
+        /* ====================================================
+           DUCK : # ou SWD
+           ==================================================== */
+        if (key == '#')
+        {
+            // 1. Envoyer commande position action
+            PWM_WriteCompare2(SERVO_ACTION);
+            LED3_Write(0);
+            LED4_Write(0);
+            // 2. Attendre que le servo atteigne sa position action
+            CyDelay(TEMPS_ALLER);
+            // 3. Envoyer commande position repos
+            PWM_WriteCompare2(SERVO_REPOS);
+            LED3_Write(1);
+            LED4_Write(1);
+            // 4. Attendre que le servo atteigne sa position repos
+            CyDelay(TEMPS_RETOUR);
+        }
+        else if (SWD_Read() == 0u)
+        {
+            PWM_WriteCompare2(SERVO_ACTION);
+            LED3_Write(0);
+            LED4_Write(0);
+        }
+        else
+        {
+            PWM_WriteCompare2(SERVO_REPOS);
+            LED3_Write(1);
+            LED4_Write(1);
+        }
+    }
+}
