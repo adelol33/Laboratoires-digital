@@ -1,0 +1,56 @@
+#include "project.h"
+
+const uint16 jumpFreqs[]     = {330, 392, 494, 523, 659};
+const uint16 jumpDurations[] = {60,  50,  50,  50,  80};
+
+volatile uint8  dacState     = 0;
+volatile uint32 toggleCount  = 0;
+volatile uint32 toggleTarget = 0;
+volatile uint8  toneFinished = 1;
+
+CY_ISR(isr_Timer_Handler) {
+    Timer_Tone_ReadStatusRegister();
+    if (toggleCount < toggleTarget) {
+        dacState = !dacState;
+        DAC_SetValue(dacState ? 255 : 0);
+        toggleCount++;
+    } else {
+        DAC_SetValue(0);
+        Timer_Tone_Stop();
+        toneFinished = 1;
+    }
+}
+
+void PlayTone(uint16 freqHz, uint16 duration_ms) {
+    uint32 halfPeriodUs = 500000UL / freqHz;
+    toggleTarget = ((uint32)duration_ms * 1000UL) / halfPeriodUs;
+    toggleCount  = 0;
+    toneFinished = 0;
+    dacState     = 0;
+    Timer_Tone_Stop();
+    Timer_Tone_WritePeriod(halfPeriodUs - 1);
+    Timer_Tone_WriteCounter(halfPeriodUs - 1);
+    Timer_Tone_Start();
+}
+
+void PlayJumpSound() {
+    uint8 i;
+    for (i = 0; i < 5; i++) {
+        PlayTone(jumpFreqs[i], jumpDurations[i]);
+        while (!toneFinished);
+    }
+}
+
+int main(void) {
+    CyGlobalIntEnable;
+    DAC_Start();
+    isr_Timer_StartEx(isr_Timer_Handler);
+
+    for(;;) {
+        // SW_Read() == 0 → bouton appuyé (pull-up)
+        if (SW_Read() == 1) {
+            PlayJumpSound();
+             // anti-rebond : évite de rejouer en boucle
+        }
+    }
+}
