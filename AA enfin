@@ -1,0 +1,267 @@
+/* ========================================
+ *
+ * Copyright YOUR COMPANY, THE YEAR
+ * All Rights Reserved
+ * UNPUBLISHED, LICENSED SOFTWARE.
+ * 
+ * CONFIDENTIAL AND PROPRIETARY INFORMATION
+ * WHICH IS THE PROPERTY OF your company.
+ *
+ * ========================================
+*/
+#include "project.h"
+#include "keypad.h"
+#include <stdint.h>
+
+#define SERVO_REPOS     2000u
+#define SERVO_ACTION    1500u
+#define TEMPS_ALLER     300u  // temps pour aller en position action (à ajuster si besoin)
+#define TEMPS_RETOUR    300u  // temps pour revenir en position repos (à ajuster si besoin)
+
+#define SEUIL_PHOTO_D   900u 
+#define SEUIL_PHOTO_J   1400u
+
+uint16_t score = 0;
+uint8_t  gameRunning = 0; 
+uint32_t timerMS = 0;
+
+const uint16 jumpFreqs[]     = {330, 392, 494, 523, 659};
+const uint16 jumpDurations[] = {60,  50,  50,  50,  80};
+
+// Son de descente = fréquences inversées
+const uint16 dropFreqs[]     = {659, 523, 494, 392, 330};
+const uint16 dropDurations[] = {80,  50,  50,  50,  60};
+
+volatile uint8  dacState     = 0;
+volatile uint32 toggleCount  = 0;
+volatile uint32 toggleTarget = 0;
+volatile uint8  toneFinished = 1;
+
+void AffichageAction(char* texte) {
+    LCD_Position(0, 0);
+    LCD_PrintString("                "); 
+    LCD_Position(0, 0);
+    LCD_PrintString(texte);
+}
+
+
+void AffichageScore() {
+    LCD_Position(1, 0);
+    LCD_PrintNumber(score);
+    LCD_PrintString("    "); 
+}
+
+CY_ISR(isr_Timer_Handler) {
+    Timer_Tone_ReadStatusRegister();
+    if (toggleCount < toggleTarget) {
+        dacState = !dacState;
+        DAC_SetValue(dacState ? 255 : 0);
+        toggleCount++;
+    } else {
+        DAC_SetValue(0);
+        Timer_Tone_Stop();
+        toneFinished = 1;
+    }
+}
+
+CY_ISR(isr_1ms_Handler) {
+    Timer_1ms_ReadStatusRegister(); // clear interrupt
+    if (gameRunning) {
+        timerMS++;
+    }
+}
+
+void PlayTone(uint16 freqHz, uint16 duration_ms) {
+    uint32 halfPeriodUs = 500000UL / freqHz;
+    toggleTarget = ((uint32)duration_ms * 1000UL) / halfPeriodUs;
+    toggleCount  = 0;
+    toneFinished = 0;
+    dacState     = 0;
+    Timer_Tone_Stop();
+    Timer_Tone_WritePeriod(halfPeriodUs - 1);
+    Timer_Tone_WriteCounter(halfPeriodUs - 1);
+    Timer_Tone_Start();
+}
+
+void PlayJumpSound() {
+    uint8 i;
+    for (i = 0; i < 5; i++) {
+        PlayTone(jumpFreqs[i], jumpDurations[i]);
+        while (!toneFinished);
+    }
+}
+
+void PlayDropSound() {
+    uint8 i;
+    for (i = 0; i < 5; i++) {
+        PlayTone(dropFreqs[i], dropDurations[i]);
+        while (!toneFinished);
+    }
+}
+
+int main(void)
+{
+    CyGlobalIntEnable;
+
+    PWM_Start();
+    
+    keypadInit();
+    
+    LCD_Start();
+    LCD_ClearDisplay();
+    AffichageScore();
+    
+    DAC_Start();
+    
+    Timer_1ms_Start();
+    isr_Timer_StartEx(isr_Timer_Handler);
+    isr_1ms_StartEx(isr_1ms_Handler);
+    
+    ADC_Start();
+    ADC_StartConvert();
+    
+    PWM_WriteCompare1(SERVO_REPOS);
+    PWM_WriteCompare2(SERVO_REPOS);
+    LED1_Write(1);
+    LED2_Write(1);
+    LED3_Write(1);
+    LED4_Write(1);
+    
+    for(;;)
+    {
+        int16 valPhotoJ = ADC_GetResult16(0);
+        int16 valPhotoD = ADC_GetResult16(1);
+        {
+        // On utilise un "while" au cas où timerMS dépasse 1000 de beaucoup
+        while (timerMS >= 1000) {
+            score += 10;
+            timerMS -= 1000; // On soustrait 1000 au lieu de mettre à 0 pour garder les ms restantes
+            AffichageScore();
+            }
+        }
+        
+        char key = keypadScan();
+        uint8_t actionEnCours = 0;
+
+        /* ====================================================
+           JUMP : * ou SWJ
+           ==================================================== */
+        if (key == '*')
+        {
+            // 1. Envoyer commande position action
+            actionEnCours = 1;
+            if (gameRunning == 0) gameRunning = 1;
+            AffichageAction("JUMP!");
+            PWM_WriteCompare1(SERVO_ACTION);
+            LED1_Write(1);
+            LED2_Write(1);
+            PlayJumpSound();
+            // 2. Attendre que le servo atteigne sa position action
+            CyDelay(TEMPS_ALLER);
+            // 3. Envoyer commande position repos
+            PWM_WriteCompare1(SERVO_REPOS);
+            LED1_Write(0);
+            LED2_Write(0);
+            // 4. Attendre que le servo atteigne sa position repos
+            CyDelay(TEMPS_RETOUR);
+       
+        }
+        else if (SWJ_Read() == 1u)
+        {
+           
+            actionEnCours = 1;
+            if (gameRunning == 0) gameRunning = 1;
+            PWM_WriteCompare1(SERVO_ACTION);
+            AffichageAction("JUMP!");
+            LED1_Write(1);
+            LED2_Write(1);
+            PlayJumpSound();
+        }
+        else if (valPhotoJ < SEUIL_PHOTO_J)   // ← photo séparée ici
+        {
+            actionEnCours = 1;
+            if (gameRunning == 0) gameRunning = 1;
+            AffichageAction("JUMP!");
+            PWM_WriteCompare1(SERVO_ACTION);
+            LED1_Write(1);
+            LED2_Write(1);
+            PlayJumpSound();
+            CyDelay(TEMPS_ALLER);
+            PWM_WriteCompare1(SERVO_REPOS);
+            LED1_Write(0);
+            LED2_Write(0);
+            CyDelay(TEMPS_RETOUR);
+        }
+        else
+        {
+            PWM_WriteCompare1(SERVO_REPOS);
+            LED1_Write(0);
+            LED2_Write(0);
+        }
+        /*====================================================
+           DUCK : # ou SWD
+           ==================================================== */
+        if (key == '#')
+        {
+            // 1. Envoyer commande position action
+            actionEnCours = 1;
+            AffichageAction("DUCK!");
+            PWM_WriteCompare2(SERVO_ACTION);
+            LED3_Write(1);
+            LED4_Write(1);
+            PlayDropSound();
+            // 2. Attendre que le servo atteigne sa position action
+            CyDelay(TEMPS_ALLER);
+            // 3. Envoyer commande position repos
+            PWM_WriteCompare2(SERVO_REPOS);
+            LED3_Write(0);
+            LED4_Write(0);
+            // 4. Attendre que le servo atteigne sa position repos
+            CyDelay(TEMPS_RETOUR);
+        }
+        else if (SWD_Read() == 1u)
+        
+        {
+            actionEnCours = 1;
+            AffichageAction("DUCK!");
+            PWM_WriteCompare2(SERVO_ACTION);
+            LED3_Write(1);
+            LED4_Write(1);
+            PlayDropSound();
+        }
+        else if (valPhotoD < SEUIL_PHOTO_D)   // ← photo séparée ici
+        {
+            actionEnCours = 1;
+            AffichageAction("DUCK!");
+            PWM_WriteCompare2(SERVO_ACTION);
+            LED3_Write(1);
+            LED4_Write(1);
+            PlayDropSound();
+            CyDelay(TEMPS_ALLER);
+            PWM_WriteCompare2(SERVO_REPOS);
+            LED3_Write(0);
+            LED4_Write(0);
+            CyDelay(TEMPS_RETOUR);
+        }
+        else
+        {
+            PWM_WriteCompare2(SERVO_REPOS);
+            LED3_Write(0);
+            LED4_Write(0);
+        }
+        if (SWR_Read() == 1u)
+        {
+            actionEnCours = 1;
+            score = 0;
+            gameRunning = 0;
+            timerMS = 0;
+            AffichageAction("RESET");
+            AffichageScore();// Lecture des photorésistors
+
+        if (actionEnCours == 0)
+        {
+            AffichageAction(""); 
+            }
+        }
+    }
+}
