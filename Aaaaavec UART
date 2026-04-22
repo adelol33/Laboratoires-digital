@@ -1,0 +1,335 @@
+#include "project.h"
+#include "keypad.h"
+#include <stdint.h>
+#include <string.h>
+
+#define SERVOJ_REPOS     550u
+#define SERVOJ_ACTION    450u
+#define SERVOD_REPOS     1150u
+#define SERVOD_ACTION    1000u
+#define TEMPS_ALLER      50u
+#define TEMPS_RETOUR     50u
+
+#define SEUIL_PHOTO_D   1500u 
+#define SEUIL_PHOTO_J   1750u
+#define SEUIL_PHOTO_JOUR_MIN   1100u 
+#define SEUIL_PHOTO_D_NUIT   350u 
+#define SEUIL_PHOTO_J_NUIT   600u
+
+uint16_t score = 0;
+uint8_t  gameRunning = 0; 
+uint32_t timerMS = 0;
+
+// ── UART ──────────────────────────────────────────
+char    comBuf[5] = {0};
+int     charCount    = 0;
+char    rxData;
+
+CY_ISR(isr_uart_rx_Handler) {
+    uint8_t status = 0;
+    do {
+        status = UART_ReadRxStatus();
+        if ((status & UART_RX_STS_FIFO_NOTEMPTY) != 0) {
+            rxData = UART_ReadRxData();
+            if (rxData != '\r' && rxData != '\n') {
+                if (charCount < 4) {
+                    comBuf[charCount] = rxData;
+                    charCount++;
+                    if (charCount < 5) comBuf[charCount] = '\0';
+                } else {
+                    charCount = 0;
+                    memset(comBuf, 0, sizeof(comBuf));
+                }
+            }
+        }
+    } while ((status & UART_RX_STS_FIFO_NOTEMPTY) != 0);
+}
+// ──────────────────────────────────────────────────
+
+const uint16 jumpFreqs[]     = {330, 392, 494, 523, 659};
+const uint16 jumpDurations[] = {60,  50,  50,  50,  80};
+const uint16 dropFreqs[]     = {659, 523, 494, 392, 330};
+const uint16 dropDurations[] = {80,  50,  50,  50,  60};
+
+volatile uint8  dacState     = 0;
+volatile uint32 toggleCount  = 0;
+volatile uint32 toggleTarget = 0;
+volatile uint8  toneFinished = 1;
+
+void AffichageAction(char* texte) {
+    LCD_Position(0, 0);
+    LCD_PrintString("                "); 
+    LCD_Position(0, 0);
+    LCD_PrintString(texte);
+}
+
+void AffichageScore() {
+    LCD_Position(1, 0);
+    LCD_PrintNumber(score);
+    LCD_PrintString("    "); 
+}
+
+CY_ISR(isr_Timer_Handler) {
+    Timer_Tone_ReadStatusRegister();
+    if (toggleCount < toggleTarget) {
+        dacState = !dacState;
+        DAC_SetValue(dacState ? 255 : 0);
+        toggleCount++;
+    } else {
+        DAC_SetValue(0);
+        Timer_Tone_Stop();
+        toneFinished = 1;
+    }
+}
+
+CY_ISR(isr_1ms_Handler) {
+    Timer_1ms_ReadStatusRegister();
+    if (gameRunning) timerMS++;
+}
+
+void PlayTone(uint16 freqHz, uint16 duration_ms) {
+    uint32 halfPeriodUs = 500000UL / freqHz;
+    toggleTarget = ((uint32)duration_ms * 1000UL) / halfPeriodUs;
+    toggleCount  = 0;
+    toneFinished = 0;
+    dacState     = 0;
+    Timer_Tone_Stop();
+    Timer_Tone_WritePeriod(halfPeriodUs - 1);
+    Timer_Tone_WriteCounter(halfPeriodUs - 1);
+    Timer_Tone_Start();
+}
+
+void PlayJumpSound() {
+    uint8 i;
+    for (i = 0; i < 5; i++) {
+        PlayTone(jumpFreqs[i], jumpDurations[i]);
+        while (!toneFinished);
+    }
+}
+
+void PlayDropSound() {
+    uint8 i;
+    for (i = 0; i < 5; i++) {
+        PlayTone(dropFreqs[i], dropDurations[i]);
+        while (!toneFinished);
+    }
+}
+
+void ModeCalibration() {
+    LCD_ClearDisplay();
+    LCD_Position(0, 0);
+    LCD_PrintString("CALIB MODE");
+    CyDelay(1000);
+    while (SWR_Read() == 0u) {
+        int16 valJ = ADC_GetResult16(0);
+        int16 valD = ADC_GetResult16(1);
+        LCD_Position(0, 0);
+        LCD_PrintString("J:");
+        LCD_PrintNumber(valJ);
+        LCD_PrintString("   ");
+        LCD_Position(1, 0);
+        LCD_PrintString("D:");
+        LCD_PrintNumber(valD);
+        LCD_PrintString("   ");
+        CyDelay(100);
+    }
+    LCD_ClearDisplay();
+}
+
+int main(void)
+{
+    CyGlobalIntEnable;
+
+    PWM_Start();
+    keypadInit();
+    LCD_Start();
+    LCD_ClearDisplay();
+    AffichageScore();
+    DAC_Start();
+    Timer_1ms_Start();
+    UART_Start();
+    isr_Timer_StartEx(isr_Timer_Handler);
+    isr_1ms_StartEx(isr_1ms_Handler);
+    isr_StartEx(isr_uart_rx_Handler);
+    ADC_Start();
+    ADC_StartConvert();
+
+    PWM_WriteCompare1(SERVOJ_REPOS);
+    PWM_WriteCompare2(SERVOD_REPOS);
+    LED1_Write(1);
+    LED2_Write(1);
+    LED3_Write(1);
+    LED4_Write(1);
+
+    for(;;)
+    {
+        int16 valPhotoJ = ADC_GetResult16(0);
+        int16 valPhotoD = ADC_GetResult16(1);
+
+        while (timerMS >= 1000) {
+            score += 10;
+            timerMS -= 1000;
+            AffichageScore();
+        }
+
+        char key = keypadScan();
+        uint8_t actionEnCours = 0;
+
+        /* ====================================================
+           JUMP : * ou SWJ ou "jump" reçu par UART
+           ==================================================== */
+        if (comBuf[0] != '\0' && !strcmp(comBuf, "jump"))
+        {
+            actionEnCours = 1;
+            if (gameRunning == 0) gameRunning = 1;
+            AffichageAction("JUMP!");
+            UART_PutString("Jump\r\n");
+            memset(comBuf, 0, sizeof(comBuf));
+            charCount = 0;
+            PWM_WriteCompare1(SERVOJ_ACTION);
+            LED1_Write(1);
+            LED2_Write(1);
+            PlayJumpSound();
+            CyDelay(TEMPS_ALLER);
+            PWM_WriteCompare1(SERVOJ_REPOS);
+            LED1_Write(0);
+            LED2_Write(0);
+            CyDelay(TEMPS_RETOUR);
+        }
+        else if (key == '*')
+        {
+            actionEnCours = 1;
+            if (gameRunning == 0) gameRunning = 1;
+            AffichageAction("JUMP!");
+            UART_PutString("Jump\r\n");
+            PWM_WriteCompare1(SERVOJ_ACTION);
+            LED1_Write(1);
+            LED2_Write(1);
+            PlayJumpSound();
+            CyDelay(TEMPS_ALLER);
+            PWM_WriteCompare1(SERVOJ_REPOS);
+            LED1_Write(0);
+            LED2_Write(0);
+            CyDelay(TEMPS_RETOUR);
+        }
+        else if (SWJ_Read() == 1u)
+        {
+            actionEnCours = 1;
+            if (gameRunning == 0) gameRunning = 1;
+            AffichageAction("JUMP!");
+            UART_PutString("Jump\r\n");
+            PWM_WriteCompare1(SERVOJ_ACTION);
+            LED1_Write(1);
+            LED2_Write(1);
+            PlayJumpSound();
+        }
+        else if ((valPhotoJ < SEUIL_PHOTO_J && valPhotoJ > SEUIL_PHOTO_JOUR_MIN) || (valPhotoJ > SEUIL_PHOTO_J_NUIT && valPhotoJ < SEUIL_PHOTO_JOUR_MIN))
+        {
+            actionEnCours = 1;
+            if (gameRunning == 0) gameRunning = 1;
+            AffichageAction("JUMP!");
+            UART_PutString("Jump\r\n");
+            PWM_WriteCompare1(SERVOJ_ACTION);
+            LED1_Write(1);
+            LED2_Write(1);
+            PlayJumpSound();
+            CyDelay(TEMPS_ALLER);
+            PWM_WriteCompare1(SERVOJ_REPOS);
+            LED1_Write(0);
+            LED2_Write(0);
+            CyDelay(TEMPS_RETOUR);
+        }
+        else
+        {
+            PWM_WriteCompare1(SERVOJ_REPOS);
+            LED1_Write(0);
+            LED2_Write(0);
+        }
+
+        /* ====================================================
+           DUCK : # ou SWD ou "duck" reçu par UART
+           ==================================================== */
+        if (comBuf[0] != '\0' && !strcmp(comBuf, "duck"))
+        {
+            actionEnCours = 1;
+            AffichageAction("DUCK!");
+            UART_PutString("Duck\r\n");
+            memset(comBuf, 0, sizeof(comBuf));
+            charCount = 0;
+            PWM_WriteCompare2(SERVOD_ACTION);
+            LED3_Write(1);
+            LED4_Write(1);
+            PlayDropSound();
+            CyDelay(TEMPS_ALLER);
+            PWM_WriteCompare2(SERVOD_REPOS);
+            LED3_Write(0);
+            LED4_Write(0);
+            CyDelay(TEMPS_RETOUR);
+        }
+        else if (key == '#')
+        {
+            actionEnCours = 1;
+            AffichageAction("DUCK!");
+            UART_PutString("Duck\r\n");
+            PWM_WriteCompare2(SERVOD_ACTION);
+            LED3_Write(1);
+            LED4_Write(1);
+            PlayDropSound();
+            CyDelay(TEMPS_ALLER);
+            PWM_WriteCompare2(SERVOD_REPOS);
+            LED3_Write(0);
+            LED4_Write(0);
+            CyDelay(TEMPS_RETOUR);
+        }
+        else if (SWD_Read() == 1u)
+        {
+            actionEnCours = 1;
+            AffichageAction("DUCK!");
+            UART_PutString("Duck\r\n");
+            PWM_WriteCompare2(SERVOD_ACTION);
+            LED3_Write(1);
+            LED4_Write(1);
+            PlayDropSound();
+        }
+        else if ((valPhotoD < SEUIL_PHOTO_D && valPhotoD > SEUIL_PHOTO_JOUR_MIN) || (valPhotoD > SEUIL_PHOTO_D && valPhotoD < SEUIL_PHOTO_JOUR_MIN))
+        {
+            actionEnCours = 1;
+            AffichageAction("DUCK!");
+            UART_PutString("Duck\r\n");
+            PWM_WriteCompare2(SERVOD_ACTION);
+            LED3_Write(1);
+            LED4_Write(1);
+            PlayDropSound();
+            CyDelay(TEMPS_ALLER);
+            PWM_WriteCompare2(SERVOD_REPOS);
+            LED3_Write(0);
+            LED4_Write(0);
+            CyDelay(TEMPS_RETOUR);
+        }
+        else
+        {
+            PWM_WriteCompare2(SERVOD_REPOS);
+            LED3_Write(0);
+            LED4_Write(0);
+        }
+
+        if (SWR_Read() == 1u)
+        {
+            actionEnCours = 1;
+            score = 0;
+            gameRunning = 0;
+            timerMS = 0;
+            AffichageAction("RESET");
+            AffichageScore();
+        }
+
+        if (actionEnCours == 0)
+        {
+            AffichageAction(""); 
+        }
+
+        if (keypadScan() == '0') {
+            ModeCalibration();
+        }
+    }
+}
